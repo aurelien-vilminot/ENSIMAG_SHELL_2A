@@ -18,16 +18,16 @@
 #error "Variante non défini !!"
 #endif
 
-/* Guile (1.8 and 2.0) is auto-detected by cmake */
-/* To disable Scheme interpreter (Guile support), comment the
- * following lines.  You may also have to comment related pkg-config
- * lines in CMakeLists.txt.
- */
+ /* Guile (1.8 and 2.0) is auto-detected by cmake */
+ /* To disable Scheme interpreter (Guile support), comment the
+  * following lines.  You may also have to comment related pkg-config
+  * lines in CMakeLists.txt.
+  */
 
 #if USE_GUILE == 1
 #include <libguile.h>
 
-int question6_executer(char *line) {
+int question6_executer(char* line) {
     /* Question 6: Insert your code to execute the command line
      * identically to the standard execution scheme:
      * parsecmd, then fork+execvp, for a single command.
@@ -46,7 +46,7 @@ SCM executer_wrapper(SCM x) {
 }
 #endif
 
-void terminate(char *line) {
+void terminate(char* line) {
 #if USE_GNU_READLINE == 1
     /* rl_clear_history() does not exist yet in centOS 6 */
     clear_history();
@@ -66,8 +66,9 @@ struct jobc* jobs = NULL;
 
 void push_jobc(char** cmd, int pid) {
     struct jobc* new = malloc(sizeof(struct jobc));
-    new->cmd = malloc(sizeof(char*));
-    for(int i = 0; cmd[i] != NULL; i++){
+    // TODO : remplacer 10 par sa valeur 
+    new->cmd = malloc(sizeof(char*) * 10);
+    for (int i = 0; cmd[i] != NULL; i++) {
         new->cmd[i] = malloc(strlen(cmd[i] + 1));
         strcpy(new->cmd[i], cmd[i]);
     }
@@ -80,11 +81,12 @@ void push_jobc(char** cmd, int pid) {
 void remove_jobc(int pid) {
     struct jobc* ptr = malloc(sizeof(struct jobc));
     struct jobc* old = NULL;
-    for (struct jobc* ptr = jobs; ptr != NULL; ptr = ptr->next) {
+    for (ptr = jobs; ptr != NULL; ptr = ptr->next) {
         if (ptr->pid == pid) {
             if (old == NULL) {
                 jobs = ptr->next;
-            } else {
+            }
+            else {
                 old->next = ptr->next;
             }
             free(ptr->cmd);
@@ -95,39 +97,46 @@ void remove_jobc(int pid) {
 }
 
 void print_jobc() {
-    printf("\n");
+    int state;
+    int returnwait;
     for (struct jobc* ptr = jobs; ptr != NULL; ptr = ptr->next) {
-        printf("[%i]\t", ptr->pid);
-        for (int i = 0; ptr->cmd[i] != NULL; i++){
-            printf("%s ", ptr->cmd[i]);
+        returnwait = waitpid(ptr->pid, &state, WNOHANG);
+        if (returnwait == ptr->pid) {
+            // If process ptr->pid has ended
+            remove_jobc(ptr->pid);
+            continue;
         }
         printf("\n");
+        printf("[%i]\t", ptr->pid);
+        for (int i = 0; ptr->cmd[i] != NULL; i++) {
+            printf("%s ", ptr->cmd[i]);
+        }
     }
 }
 
-void execute(char **cmd, struct cmdline *l) {
+void execute(char** cmd, struct cmdline* l) {
     int pid, w_status;
-	pid = fork();
+
+    if (!strcmp(cmd[0], "jobs")) {
+        print_jobc();
+        return;
+    }
+
+    pid = fork();
     if (pid == 0) {
-        if (!strcmp(cmd[0], "jobs")) {
-            print_jobc();
-            return;
-        }
         execvp(cmd[0], cmd);
         printf("\nCommand not recognized");
-		// KILL NE MARCHE PAS
-		kill(0, 0);
-		return;
-    } else {
+        // KILL NE MARCHE PAS
+        kill(0, 0);
+        return;
+    }
+    else {
         if (!l->bg) {
             waitpid(pid, &w_status, 0);
-			// printf("\nJ'ai attendu gentilment :)");
-        } else {
+        }
+        else {
             push_jobc(cmd, pid);
-            // QUAND EST-CE QUE C'EST FINI?
-            // Il faut l'enlever de la liste après
-			// printf("\nDESO PAS LE TEMPS BG");
-		}
+        }
     }
 }
 
@@ -141,10 +150,10 @@ int main() {
 #endif
 
     while (1) {
-        struct cmdline *l;
-        char *line = 0;
+        struct cmdline* l;
+        char* line = 0;
         int i, j;
-        char *prompt = "ensishell>";
+        char* prompt = "ensishell>";
 
         /* Readline use some internal memory structure that
            can not be cleaned at the end of the program. Thus
@@ -163,9 +172,9 @@ int main() {
         if (line[0] == '(') {
             char catchligne[strlen(line) + 256];
             sprintf(catchligne,
-                    "(catch #t (lambda () %s) (lambda (key . parameters) "
-                    "(display \"mauvaise expression/bug en scheme\n\")))",
-                    line);
+                "(catch #t (lambda () %s) (lambda (key . parameters) "
+                "(display \"mauvaise expression/bug en scheme\n\")))",
+                line);
             scm_eval_string(scm_from_locale_string(catchligne));
             free(line);
             continue;
@@ -192,7 +201,7 @@ int main() {
 
         /* Display each command of the pipe */
         for (i = 0; l->seq[i] != 0; i++) {
-            char **cmd = l->seq[i];
+            char** cmd = l->seq[i];
             printf("seq[%d]: ", i);
             for (j = 0; cmd[j] != 0; j++) {
                 printf("'%s' ", cmd[j]);
