@@ -56,10 +56,63 @@ void terminate(char *line) {
     exit(0);
 }
 
+struct jobc {
+    char** cmd;
+    int pid;
+    struct jobc* next;
+};
+
+struct jobc* jobs = NULL;
+
+void push_jobc(char** cmd, int pid) {
+    struct jobc* new = malloc(sizeof(struct jobc));
+    new->cmd = malloc(sizeof(char*));
+    for(int i = 0; cmd[i] != NULL; i++){
+        new->cmd[i] = malloc(strlen(cmd[i] + 1));
+        strcpy(new->cmd[i], cmd[i]);
+    }
+    new->pid = pid;
+    new->next = jobs;
+    jobs = new;
+}
+
+// Remove pid from jobs
+void remove_jobc(int pid) {
+    struct jobc* ptr = malloc(sizeof(struct jobc));
+    struct jobc* old = NULL;
+    for (struct jobc* ptr = jobs; ptr != NULL; ptr = ptr->next) {
+        if (ptr->pid == pid) {
+            if (old == NULL) {
+                jobs = ptr->next;
+            } else {
+                old->next = ptr->next;
+            }
+            free(ptr->cmd);
+            free(ptr);
+        }
+        old = ptr;
+    }
+}
+
+void print_jobc() {
+    printf("\n");
+    for (struct jobc* ptr = jobs; ptr != NULL; ptr = ptr->next) {
+        printf("[%i]\t", ptr->pid);
+        for (int i = 0; ptr->cmd[i] != NULL; i++){
+            printf("%s ", ptr->cmd[i]);
+        }
+        printf("\n");
+    }
+}
+
 void execute(char **cmd, struct cmdline *l) {
     int pid, w_status;
 	pid = fork();
     if (pid == 0) {
+        if (!strcmp(cmd[0], "jobs")) {
+            print_jobc();
+            return;
+        }
         execvp(cmd[0], cmd);
         printf("\nCommand not recognized");
 		// KILL NE MARCHE PAS
@@ -67,10 +120,13 @@ void execute(char **cmd, struct cmdline *l) {
 		return;
     } else {
         if (!l->bg) {
-			printf("\nJ'ai attendu gentilment :)");
             waitpid(pid, &w_status, 0);
+			// printf("\nJ'ai attendu gentilment :)");
         } else {
-			printf("\nDESO PAS LE TEMPS BG");
+            push_jobc(cmd, pid);
+            // QUAND EST-CE QUE C'EST FINI?
+            // Il faut l'enlever de la liste après
+			// printf("\nDESO PAS LE TEMPS BG");
 		}
     }
 }
