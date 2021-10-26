@@ -64,12 +64,11 @@ struct jobc {
 
 struct jobc* jobs = NULL;
 
-void push_jobc(char** cmd, int pid) {
+void push_jobc(char** cmd, int pid, int nb_args) {
     struct jobc* new = malloc(sizeof(struct jobc));
-    // TODO : remplacer 10 par sa valeur 
-    new->cmd = malloc(sizeof(char*) * 10);
+    new->cmd = calloc(nb_args, sizeof(char*));
     for (int i = 0; cmd[i] != NULL; i++) {
-        new->cmd[i] = malloc(strlen(cmd[i] + 1));
+        new->cmd[i] = malloc(strlen(cmd[i]) + 1);
         strcpy(new->cmd[i], cmd[i]);
     }
     new->pid = pid;
@@ -98,11 +97,11 @@ void remove_jobc(int pid) {
 
 void print_jobc() {
     int state;
-    int returnwait;
+    int process_sate;
     for (struct jobc* ptr = jobs; ptr != NULL; ptr = ptr->next) {
-        returnwait = waitpid(ptr->pid, &state, WNOHANG);
-        if (returnwait == ptr->pid) {
-            // If process ptr->pid has ended
+        process_sate = waitpid(ptr->pid, &state, WNOHANG);
+        if (process_sate == ptr->pid) {
+            // If process ptr->pid has ended, remove it from jobs list
             remove_jobc(ptr->pid);
             continue;
         }
@@ -114,14 +113,30 @@ void print_jobc() {
     }
 }
 
-void execute(char** cmd, struct cmdline* l) {
-    int pid, w_status;
+void exec_pipe(char** cmd1, char** cmd2) {
+    int tuyau[2];
+    int pid = fork();
 
+    pipe(tuyau);
+    if (pid == 0) {
+        dup2(tuyau[0], 0);
+        close(tuyau[1]);
+        close(tuyau[0]);
+        execvp(cmd2[0], cmd2);
+    }
+    dup2(tuyau[1], 1);
+    close(tuyau[0]);
+    close(tuyau[1]);
+    execvp(cmd1[0], cmd1);
+}
+
+void execute(char** cmd, struct cmdline* l, int nb_args) {
     if (!strcmp(cmd[0], "jobs")) {
         print_jobc();
         return;
     }
 
+    int pid, w_status;
     pid = fork();
     if (pid == 0) {
         execvp(cmd[0], cmd);
@@ -135,7 +150,7 @@ void execute(char** cmd, struct cmdline* l) {
             waitpid(pid, &w_status, 0);
         }
         else {
-            push_jobc(cmd, pid);
+            push_jobc(cmd, pid, nb_args);
         }
     }
 }
@@ -201,12 +216,22 @@ int main() {
 
         /* Display each command of the pipe */
         for (i = 0; l->seq[i] != 0; i++) {
+            int nb_args = 0;
             char** cmd = l->seq[i];
             printf("seq[%d]: ", i);
             for (j = 0; cmd[j] != 0; j++) {
                 printf("'%s' ", cmd[j]);
+                ++nb_args;
             }
-            execute(cmd, l);
+            if (l->seq[i+1] != NULL) {
+                // If there is a pipe
+                printf("PIPE");
+                exec_pipe(cmd, l->seq[++i]);
+            } else {
+                // If it is a unique command
+                printf("\nNO PIPE");
+                execute(cmd, l, nb_args);
+            }
             printf("\n");
         }
     }
