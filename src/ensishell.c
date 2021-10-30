@@ -114,20 +114,29 @@ void print_jobc() {
 }
 
 void exec_pipe(char** cmd1, char** cmd2) {
-    int tuyau[2];
-    int pid = fork();
+    // Create a new child process
+    int pid, w_status;
+    if ((pid = fork()) == 0) {
+        int tuyau[2];
+        if (pipe(tuyau) == -1) {
+            printf("Pipe creation has failed");
+        }
 
-    pipe(tuyau);
-    if (pid == 0) {
-        dup2(tuyau[0], 0);
-        close(tuyau[1]);
+        if(fork() == 0) {
+            dup2(tuyau[0], 0);
+            close(tuyau[1]);
+            close(tuyau[0]);
+            execvp(cmd2[0], cmd2);
+            printf("\nCommand %s not recognized", cmd2[0]);
+        }
+        dup2(tuyau[1], 1);
         close(tuyau[0]);
-        execvp(cmd2[0], cmd2);
+        close(tuyau[1]);
+        execvp(cmd1[0], cmd1);
+        printf("\nCommand not recognized");
+    } else {
+        waitpid(pid, &w_status, 0);
     }
-    dup2(tuyau[1], 1);
-    close(tuyau[0]);
-    close(tuyau[1]);
-    execvp(cmd1[0], cmd1);
 }
 
 void execute(char** cmd, struct cmdline* l, int nb_args) {
@@ -167,7 +176,7 @@ int main() {
     while (1) {
         struct cmdline* l;
         char* line = 0;
-        int i, j;
+        int j;
         char* prompt = "ensishell>";
 
         /* Readline use some internal memory structure that
@@ -214,25 +223,22 @@ int main() {
         if (l->out) printf("out: %s\n", l->out);
         if (l->bg) printf("background (&)\n");
 
-        /* Display each command of the pipe */
-        for (i = 0; l->seq[i] != 0; i++) {
-            int nb_args = 0;
-            char** cmd = l->seq[i];
-            printf("seq[%d]: ", i);
-            for (j = 0; cmd[j] != 0; j++) {
-                printf("'%s' ", cmd[j]);
-                ++nb_args;
-            }
-            if (l->seq[i+1] != NULL) {
+        if (l->seq[0] != NULL) {
+            if (l->seq[1] != NULL) {
                 // If there is a pipe
-                printf("PIPE");
-                exec_pipe(cmd, l->seq[++i]);
+                exec_pipe(l->seq[0], l->seq[1]);
             } else {
                 // If it is a unique command
-                printf("\nNO PIPE");
+                int nb_args = 0;
+                char** cmd = l->seq[0];
+                printf("seq[0]: ");
+                for (j = 0; cmd[j] != 0; j++) {
+                    printf("'%s' ", cmd[j]);
+                    ++nb_args;
+                }
                 execute(cmd, l, nb_args);
+                printf("\n");
             }
-            printf("\n");
         }
     }
 }
