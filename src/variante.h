@@ -2,7 +2,7 @@
 #define VARIANTE_H
 
 #define LOGINS clauzond;vilminoa
-#define SUJET 1
+#define SUJET 3
 #define USE_GUILE 0
 #define USE_GNU_READLINE 1
 

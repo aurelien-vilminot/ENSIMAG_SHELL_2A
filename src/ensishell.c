@@ -113,31 +113,46 @@ void print_jobc() {
     }
 }
 
-void exec_pipe(char** cmd1, char** cmd2) {
+void exec_pipe(char ***cmd) {
     // Create a new child process
-    int pid, w_status;
-    if ((pid = fork()) == 0) {
-        int tuyau[2];
-        if (pipe(tuyau) == -1) {
-            printf("Pipe creation has failed");
-        }
+    if (fork() == 0) {
+        int tuyau[2], fd_in = 0;
 
-        if(fork() == 0) {
-            dup2(tuyau[0], 0);
+        for (int i = 0 ; cmd[i] != NULL ; i++) {
+            if (pipe(tuyau) == -1) {
+                printf("Pipe creation has failed");
+            }
+            if(fork() == 0) {
+                // Connect the standard input
+                dup2(fd_in, 0);
+                if (cmd[i+1] != NULL) {
+                    // If there is one more command after this one,
+                    // connect the standard output to the input of the pipe
+                    dup2(tuyau[1], 1);
+                }
+                close(tuyau[0]);
+                execvp(cmd[i][0], cmd[i]);
+                printf("\nCommand %s not recognized", cmd[i][0]);
+            }
+            // Wait for the end of the child process just created before
+            wait(NULL);
             close(tuyau[1]);
-            close(tuyau[0]);
-            execvp(cmd2[0], cmd2);
-            printf("\nCommand %s not recognized", cmd2[0]);
+            // Backup the pipe output in order to reuse it for the next command as a standard input
+            fd_in = tuyau[0];
         }
-        dup2(tuyau[1], 1);
-        close(tuyau[0]);
-        close(tuyau[1]);
-        execvp(cmd1[0], cmd1);
-        printf("\nCommand not recognized");
     } else {
-        waitpid(pid, &w_status, 0);
+        wait(NULL);
     }
 }
+
+
+void child_handler(int sig,  siginfo_t *siginfo, void *context)
+{
+    int status;
+    while((waitpid(-1, &status, WNOHANG)) > 0);
+    printf("WE WAIT THE PID %i", siginfo->si_int);
+}
+
 
 void execute(char** cmd, struct cmdline* l, int nb_args) {
     if (!strcmp(cmd[0], "jobs")) {
@@ -145,9 +160,8 @@ void execute(char** cmd, struct cmdline* l, int nb_args) {
         return;
     }
 
-    int pid, w_status;
-    pid = fork();
-    if (pid == 0) {
+    pid_t pid;
+    if ((pid = fork()) == 0) {
         execvp(cmd[0], cmd);
         printf("\nCommand not recognized");
         // KILL NE MARCHE PAS
@@ -156,10 +170,20 @@ void execute(char** cmd, struct cmdline* l, int nb_args) {
     }
     else {
         if (!l->bg) {
-            waitpid(pid, &w_status, 0);
+            // Wait for the end of the child process just created before
+            wait(NULL);
         }
         else {
             push_jobc(cmd, pid, nb_args);
+
+            // !!! WORK IN PROGRESS FOR PROCESS TIME CALCUL !!!
+//            struct sigaction struct_sigaction;
+//            sigemptyset(&struct_sigaction.sa_mask);
+//            struct_sigaction.sa_flags = 0;
+//            struct_sigaction.sa_sigaction = child_handler;
+//
+//            sigaction(SIGCHLD, &struct_sigaction, NULL);
+//            sigqueue(getpid(), SIGCHLD, (union sigval){ .sival_int = pid });
         }
     }
 }
@@ -225,8 +249,8 @@ int main() {
 
         if (l->seq[0] != NULL) {
             if (l->seq[1] != NULL) {
-                // If there is a pipe
-                exec_pipe(l->seq[0], l->seq[1]);
+                // If there is one or more pipes
+                exec_pipe(l->seq);
             } else {
                 // If it is a unique command
                 int nb_args = 0;
