@@ -10,6 +10,7 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include "readcmd.h"
 #include "variante.h"
@@ -34,8 +35,8 @@ int question6_executer(char* line) {
      * pipe and i/o redirection are not required.
      */
 
-    /* parsecmd free line and set it up to 0 */
-    struct cmdline *l = parsecmd(&line);
+     /* parsecmd free line and set it up to 0 */
+    struct cmdline* l = parsecmd(&line);
 
     /* If input stream closed, normal termination */
     if (!l) {
@@ -137,19 +138,50 @@ void print_jobc() {
     }
 }
 
-void exec_pipe(char ***cmd) {
+// TODO: ne marche qu'avec le path entier
+void open_io(struct cmdline* l) {
+    // Ne pas exécuter dans le process principal
+    if (l->in) {
+        int fd = open(l->in, O_RDONLY);
+        if (fd == -1) {
+            perror("[ERROR] open");
+            exit(EXIT_FAILURE);
+        }
+        // Fermer descripteur entrée standard, et dupliquer le
+        // descripteur ouvert dans le descripteur entrée standard
+        dup2(fd, 0);
+        // Fermer le descripteur ouvert en double
+        close(fd);
+    }
+    if (l->out) {
+        // TODO: ne marche pas si le fichier n'existe pas
+        int fd = open(l->out, O_WRONLY);
+        if (fd == -1) {
+            perror("[ERROR] open");
+            exit(EXIT_FAILURE);
+        }
+        // Fermer descripteur sortie standard, et dupliquer le
+        // descripteur ouvert dans le descripteur sortie standard
+        dup2(fd, 1);
+        // Fermer le descripteur ouvert en double
+        close(fd);
+    }
+}
+
+void exec_pipe(char*** cmd) {
     // Create a new child process
     if (fork() == 0) {
         int tuyau[2], fd_in = 0;
 
-        for (int i = 0 ; cmd[i] != NULL ; i++) {
+        // TODO: open_io au bon endroit de exec_pipe
+        for (int i = 0; cmd[i] != NULL; i++) {
             if (pipe(tuyau) == -1) {
                 printf("Pipe creation has failed");
             }
-            if(fork() == 0) {
+            if (fork() == 0) {
                 // Connect the standard input
                 dup2(fd_in, 0);
-                if (cmd[i+1] != NULL) {
+                if (cmd[i + 1] != NULL) {
                     // If there is one more command after this one,
                     // connect the standard output to the input of the pipe
                     dup2(tuyau[1], 1);
@@ -164,19 +196,18 @@ void exec_pipe(char ***cmd) {
             // Backup the pipe output in order to reuse it for the next command as a standard input
             fd_in = tuyau[0];
         }
-    } else {
+    }
+    else {
         wait(NULL);
     }
 }
 
 
-void child_handler(int sig,  siginfo_t *siginfo, void *context)
-{
+void child_handler(int sig, siginfo_t* siginfo, void* context) {
     int status;
-    while((waitpid(-1, &status, WNOHANG)) > 0);
+    while ((waitpid(-1, &status, WNOHANG)) > 0);
     printf("WE WAIT THE PID %i", siginfo->si_int);
 }
-
 
 void execute(char** cmd, struct cmdline* l, int nb_args) {
     if (!strcmp(cmd[0], "jobs")) {
@@ -186,6 +217,7 @@ void execute(char** cmd, struct cmdline* l, int nb_args) {
 
     pid_t pid;
     if ((pid = fork()) == 0) {
+        open_io(l);
         execvp(cmd[0], cmd);
         printf("\nCommand not recognized");
         // KILL NE MARCHE PAS
@@ -275,7 +307,8 @@ int main() {
             if (l->seq[1] != NULL) {
                 // If there is one or more pipes
                 exec_pipe(l->seq);
-            } else {
+            }
+            else {
                 // If it is a unique command
                 int nb_args = 0;
                 char** cmd = l->seq[0];
