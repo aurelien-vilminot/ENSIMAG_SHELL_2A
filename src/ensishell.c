@@ -218,7 +218,8 @@ void exec_pipe(struct cmdline* l) {
                 close(tuyau[0]);
                 close(tuyau[1]);
                 execvp(cmd[i][0], cmd[i]);
-                printf("\nCommand %s not recognized", cmd[i][0]);
+                printf("\nCommand %s not recognized\n", cmd[i][0]);
+                exit(1);
             }
             // Wait for the end of the child process just created before
             wait(NULL);
