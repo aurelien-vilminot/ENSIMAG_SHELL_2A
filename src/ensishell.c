@@ -49,10 +49,6 @@ int question6_executer(char* line) {
         printf("error: %s\n", l->err);
     }
 
-    if (l->in) printf("in: %s\n", l->in);
-    if (l->out) printf("out: %s\n", l->out);
-    if (l->bg) printf("background (&)\n");
-
     if (l->seq[0] != NULL) {
         // If it is a unique command
         int nb_args = 0;
@@ -174,63 +170,58 @@ void open_out(struct cmdline* l) {
 void exec_pipe(struct cmdline* l) {
     char*** cmd = l->seq;
     // Create a new child process
-    if (fork() == 0) {
-        int tuyau[2], fd_in = 0, to_close = -1;
-        for (int i = 0; cmd[i] != NULL; i++) {
-            if (pipe(tuyau) == -1) {
-                printf("Pipe creation has failed");
-            }
-            if (fork() == 0) {
-                // Connect the standard input
-                if (l->in && i == 0) {
-                    fd_in = open(l->in, O_RDONLY);
-                    if (fd_in == -1) {
-                        perror("[ERROR] open");
-                        exit(EXIT_FAILURE);
-                    }
-                    dup2(fd_in, 0);
-                    close(fd_in);
-                }
-                else {
-                    // fd_in is either the standard input or the previous pipe output
-                    dup2(fd_in, 0);
-                    // Close the previous pipe output duplicated
-                    if (to_close != -1) {
-                        close(to_close);
-                    }
-                }
-
-                // Connect the standard output
-                if (l->out && cmd[i + 1] == NULL) {
-                    int fd_out = open(l->out, O_WRONLY | O_TRUNC | O_CREAT, 0644);
-                    if (fd_out == -1) {
-                        perror("[ERROR] open");
-                        exit(EXIT_FAILURE);
-                    }
-                    dup2(fd_out, 1);
-                    close(fd_out);
-                }
-                else if (cmd[i + 1] != NULL) {
-                    // If there is one more command after this one,
-                    // connect the standard output to the input of the pipe
-                    dup2(tuyau[1], 1);
-                }
-                close(tuyau[0]);
-                close(tuyau[1]);
-                execvp(cmd[i][0], cmd[i]);
-                printf("\nCommand %s not recognized\n", cmd[i][0]);
-                exit(1);
-            }
-            // Wait for the end of the child process just created before
-            wait(NULL);
-            close(tuyau[1]);
-            // Backup the pipe output in order to reuse it for the next command as a standard input
-            fd_in = tuyau[0];
-            to_close = tuyau[0];
+    int tuyau[2], fd_in = 0, to_close = -1;
+    for (int i = 0; cmd[i] != NULL; i++) {
+        if (pipe(tuyau) == -1) {
+            printf("Pipe creation has failed");
         }
-    }
-    else {
+        if (fork() == 0) {
+            // Connect the standard input
+            if (l->in && i == 0) {
+                fd_in = open(l->in, O_RDONLY);
+                if (fd_in == -1) {
+                    perror("[ERROR] open");
+                    exit(EXIT_FAILURE);
+                }
+                dup2(fd_in, 0);
+                close(fd_in);
+            }
+            else {
+                // fd_in is either the standard input or the previous pipe output
+                dup2(fd_in, 0);
+                // Close the previous pipe output duplicated
+                if (to_close != -1) {
+                    close(to_close);
+                }
+            }
+
+            // Connect the standard output
+            if (l->out && cmd[i + 1] == NULL) {
+                int fd_out = open(l->out, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+                if (fd_out == -1) {
+                    perror("[ERROR] open");
+                    exit(EXIT_FAILURE);
+                }
+                dup2(fd_out, 1);
+                close(fd_out);
+            }
+            else if (cmd[i + 1] != NULL) {
+                // If there is one more command after this one,
+                // connect the standard output to the input of the pipe
+                dup2(tuyau[1], 1);
+            }
+            close(tuyau[0]);
+            close(tuyau[1]);
+            execvp(cmd[i][0], cmd[i]);
+            printf("\nCommand %s not recognized\n", cmd[i][0]);
+            exit(1);
+        }
+        // Wait for the end of the child process just created before
         wait(NULL);
+        close(tuyau[1]);
+        // Backup the pipe output in order to reuse it for the next command as a standard input
+        fd_in = tuyau[0];
+        to_close = tuyau[0];
     }
 }
 
@@ -251,6 +242,7 @@ void execute(char** cmd, struct cmdline* l, int nb_args) {
     if ((pid = fork()) == 0) {
         // TODO: if cmd[0] is not recognized, do not write
         // ex: "a.txt" > cat --> "a.txt" n'est pas une commande, mais tente tout de même d'écrire dans le fichier cat
+        // https://stackoverflow.com/questions/9084099/re-opening-stdout-and-stdin-file-descriptors-after-closing-them
         open_in(l);
         open_out(l);
         execvp(cmd[0], cmd);
