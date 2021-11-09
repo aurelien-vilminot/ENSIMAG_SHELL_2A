@@ -11,6 +11,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <signal.h>
 
 #include "readcmd.h"
 #include "variante.h"
@@ -138,55 +139,84 @@ void print_jobc() {
     }
 }
 
-// TODO: ne marche qu'avec le path entier
-void open_io(struct cmdline* l) {
-    // Ne pas exécuter dans le process principal
+void open_in(struct cmdline* l) {
+    // Do not execute in main process
     if (l->in) {
         int fd = open(l->in, O_RDONLY);
         if (fd == -1) {
             perror("[ERROR] open");
             exit(EXIT_FAILURE);
         }
-        // Fermer descripteur entrée standard, et dupliquer le
-        // descripteur ouvert dans le descripteur entrée standard
+        // Close the standard output descriptor (1) and duplicate
+        // the open descriptor (fd) to the standard output descriptor
         dup2(fd, 0);
-        // Fermer le descripteur ouvert en double
-        close(fd);
-    }
-    if (l->out) {
-        // TODO: ne marche pas si le fichier n'existe pas
-        int fd = open(l->out, O_WRONLY);
-        if (fd == -1) {
-            perror("[ERROR] open");
-            exit(EXIT_FAILURE);
-        }
-        // Fermer descripteur sortie standard, et dupliquer le
-        // descripteur ouvert dans le descripteur sortie standard
-        dup2(fd, 1);
-        // Fermer le descripteur ouvert en double
+        // Close the open descriptor (fd) duplicated
         close(fd);
     }
 }
 
-void exec_pipe(char*** cmd) {
+void open_out(struct cmdline* l) {
+    // Do not execute in main process
+    if (l->out) {
+        int fd = open(l->out, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+        if (fd == -1) {
+            perror("[ERROR] open");
+            exit(EXIT_FAILURE);
+        }
+        // Close the standard output descriptor (1) and duplicate
+        // the open descriptor (fd) to the standard output descriptor
+        dup2(fd, 1);
+        // Close the open descriptor (fd) duplicated
+        close(fd);
+    }
+}
+
+void exec_pipe(struct cmdline* l) {
+    char*** cmd = l->seq;
     // Create a new child process
     if (fork() == 0) {
-        int tuyau[2], fd_in = 0;
-
-        // TODO: open_io au bon endroit de exec_pipe
+        int tuyau[2], fd_in = 0, to_close = -1;
         for (int i = 0; cmd[i] != NULL; i++) {
             if (pipe(tuyau) == -1) {
                 printf("Pipe creation has failed");
             }
             if (fork() == 0) {
                 // Connect the standard input
-                dup2(fd_in, 0);
-                if (cmd[i + 1] != NULL) {
+                if (l->in && i == 0) {
+                    fd_in = open(l->in, O_RDONLY);
+                    if (fd_in == -1) {
+                        perror("[ERROR] open");
+                        exit(EXIT_FAILURE);
+                    }
+                    dup2(fd_in, 0);
+                    close(fd_in);
+                }
+                else {
+                    // fd_in is either the standard input or the previous pipe output
+                    dup2(fd_in, 0);
+                    // Close the previous pipe output duplicated
+                    if (to_close != -1) {
+                        close(to_close);
+                    }
+                }
+
+                // Connect the standard output
+                if (l->out && cmd[i + 1] == NULL) {
+                    int fd_out = open(l->out, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+                    if (fd_out == -1) {
+                        perror("[ERROR] open");
+                        exit(EXIT_FAILURE);
+                    }
+                    dup2(fd_out, 1);
+                    close(fd_out);
+                }
+                else if (cmd[i + 1] != NULL) {
                     // If there is one more command after this one,
                     // connect the standard output to the input of the pipe
                     dup2(tuyau[1], 1);
                 }
                 close(tuyau[0]);
+                close(tuyau[1]);
                 execvp(cmd[i][0], cmd[i]);
                 printf("\nCommand %s not recognized", cmd[i][0]);
             }
@@ -195,6 +225,7 @@ void exec_pipe(char*** cmd) {
             close(tuyau[1]);
             // Backup the pipe output in order to reuse it for the next command as a standard input
             fd_in = tuyau[0];
+            to_close = tuyau[0];
         }
     }
     else {
@@ -217,11 +248,12 @@ void execute(char** cmd, struct cmdline* l, int nb_args) {
 
     pid_t pid;
     if ((pid = fork()) == 0) {
-        open_io(l);
+        // TODO: if cmd[0] is not recognized, do not write
+        // ex: "a.txt" > cat --> "a.txt" n'est pas une commande, mais tente tout de même d'écrire dans le fichier cat
+        open_in(l);
+        open_out(l);
         execvp(cmd[0], cmd);
-        printf("\nCommand not recognized");
-        // KILL NE MARCHE PAS
-        kill(0, 0);
+        printf("\nCommand not recognized\n");
         return;
     }
     else {
@@ -306,7 +338,7 @@ int main() {
         if (l->seq[0] != NULL) {
             if (l->seq[1] != NULL) {
                 // If there is one or more pipes
-                exec_pipe(l->seq);
+                exec_pipe(l);
             }
             else {
                 // If it is a unique command
