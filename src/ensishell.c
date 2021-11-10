@@ -171,11 +171,15 @@ void exec_pipe(struct cmdline* l) {
     char*** cmd = l->seq;
     // Create a new child process
     int tuyau[2], fd_in = 0, to_close = -1;
+    // TODO: gérer la taille du tableau de pid
+    pid_t child_pids[1000];
+    int nb_childs;
     for (int i = 0; cmd[i] != NULL; i++) {
         if (pipe(tuyau) == -1) {
             printf("Pipe creation has failed");
         }
-        if (fork() == 0) {
+        pid_t pid = fork();
+        if (pid == 0) {
             // Connect the standard input
             if (l->in && i == 0) {
                 fd_in = open(l->in, O_RDONLY);
@@ -215,14 +219,22 @@ void exec_pipe(struct cmdline* l) {
             execvp(cmd[i][0], cmd[i]);
             printf("\nCommand %s not recognized\n", cmd[i][0]);
             exit(1);
+        } else {
+            child_pids[i] = pid;
+            nb_childs = i;
         }
-        // Wait for the end of the child process just created before
-        wait(NULL);
         close(tuyau[1]);
         // Backup the pipe output in order to reuse it for the next command as a standard input
         fd_in = tuyau[0];
         to_close = tuyau[0];
     }
+    // Wait for the end of child process just created before
+    for (int i = 0 ; i < nb_childs ; ++i) {
+        int status;
+        waitpid(child_pids[i], &status, 0);
+    }
+    // Kill all child zombies
+    kill(0,SIGCONT);
 }
 
 
@@ -246,6 +258,7 @@ void execute(char** cmd, struct cmdline* l, int nb_args) {
         open_in(l);
         open_out(l);
         execvp(cmd[0], cmd);
+        dup2(1,1);
         printf("\nCommand not recognized\n");
         return;
     }
