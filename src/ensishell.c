@@ -80,7 +80,7 @@ void terminate(char* line) {
 
 struct jobc {
     char** cmd;
-    int pid;
+    pid_t pid;
     struct jobc* next;
 };
 
@@ -144,38 +144,6 @@ void print_jobc() {
         for (int i = 0; ptr->cmd[i] != NULL; i++) {
             printf("%s ", ptr->cmd[i]);
         }
-    }
-}
-
-void open_in(struct cmdline* l) {
-    // Do not execute in main process
-    if (l->in) {
-        int fd = open(l->in, O_RDONLY);
-        if (fd == -1) {
-            perror("[ERROR] open");
-            exit(EXIT_FAILURE);
-        }
-        // Close the standard output descriptor (1) and duplicate
-        // the open descriptor (fd) to the standard output descriptor
-        dup2(fd, 0);
-        // Close the open descriptor (fd) duplicated
-        close(fd);
-    }
-}
-
-void open_out(struct cmdline* l) {
-    // Do not execute in main process
-    if (l->out) {
-        int fd = open(l->out, O_WRONLY | O_TRUNC | O_CREAT, 0644);
-        if (fd == -1) {
-            perror("[ERROR] open");
-            exit(EXIT_FAILURE);
-        }
-        // Close the standard output descriptor (1) and duplicate
-        // the open descriptor (fd) to the standard output descriptor
-        dup2(fd, 1);
-        // Close the open descriptor (fd) duplicated
-        close(fd);
     }
 }
 
@@ -262,13 +230,6 @@ void exec_pipe(struct cmdline* l) {
     kill(0, SIGCONT);
 }
 
-
-void child_handler(int sig, siginfo_t* siginfo, void* context) {
-    int status;
-    while ((waitpid(-1, &status, WNOHANG)) > 0);
-    printf("WE WAIT THE PID %i", siginfo->si_int);
-}
-
 void execute(char** cmd, struct cmdline* l, int nb_args) {
     if (!strcmp(cmd[0], "jobs")) {
         print_jobc();
@@ -322,22 +283,14 @@ void execute(char** cmd, struct cmdline* l, int nb_args) {
         }
         else {
             push_jobc(cmd, pid, nb_args);
-
-            // !!! WORK IN PROGRESS FOR PROCESS TIME CALCUL !!!
-//            struct sigaction struct_sigaction;
-//            sigemptyset(&struct_sigaction.sa_mask);
-//            struct_sigaction.sa_flags = 0;
-//            struct_sigaction.sa_sigaction = child_handler;
-//
-//            sigaction(SIGCHLD, &struct_sigaction, NULL);
-//            sigqueue(getpid(), SIGCHLD, (union sigval){ .sival_int = pid });
         }
     }
 }
 
 void signal_handler(int sig) {
     // Reap zombies
-    int pid, status;
+    pid_t pid;
+    int status;
     while((pid = waitpid(-1, &status, WNOHANG)) > 0) {
         struct jobc* j = search_jobc(pid);
         if (j == NULL) {
@@ -348,6 +301,8 @@ void signal_handler(int sig) {
             printf("%s ", j->cmd[i]);
         }
         printf("\b] est terminé\n");
+        // Process pid has ended, remove it from jobs list
+        remove_jobc(pid);
     }
 }
 
