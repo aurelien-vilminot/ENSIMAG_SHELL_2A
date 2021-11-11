@@ -100,7 +100,7 @@ void push_jobc(char** cmd, int pid, int nb_args) {
 
 // Remove pid from jobs
 void remove_jobc(int pid) {
-    struct jobc* ptr = malloc(sizeof(struct jobc));
+    struct jobc* ptr;
     struct jobc* old = NULL;
     for (ptr = jobs; ptr != NULL; ptr = ptr->next) {
         if (ptr->pid == pid) {
@@ -117,12 +117,24 @@ void remove_jobc(int pid) {
     }
 }
 
+// Return process name
+struct jobc* search_jobc(int pid) {
+    struct jobc* ptr;
+    for (ptr = jobs; ptr != NULL; ptr = ptr->next) {
+        if (ptr->pid == pid) {
+            return ptr;
+        }
+    }
+    return NULL;
+}
+
+
 void print_jobc() {
     int state;
-    int process_sate;
+    int process_state;
     for (struct jobc* ptr = jobs; ptr != NULL; ptr = ptr->next) {
-        process_sate = waitpid(ptr->pid, &state, WNOHANG);
-        if (process_sate == ptr->pid) {
+        process_state = waitpid(ptr->pid, &state, WNOHANG);
+        if (process_state == ptr->pid) {
             // If process ptr->pid has ended, remove it from jobs list
             remove_jobc(ptr->pid);
             continue;
@@ -181,14 +193,16 @@ void exec_pipe(struct cmdline* l) {
         pid_t pid = fork();
         if (pid == 0) {
             // Connect the standard input
+            int stdin_copy, stdout_copy, fd_out;
             if (l->in && i == 0) {
+                stdin_copy = dup(0);
+                close(0);
+                // fd_in must be 0
                 fd_in = open(l->in, O_RDONLY);
                 if (fd_in == -1) {
                     perror("[ERROR] open");
                     exit(EXIT_FAILURE);
                 }
-                dup2(fd_in, 0);
-                close(fd_in);
             }
             else {
                 // fd_in is either the standard input or the previous pipe output
@@ -201,13 +215,14 @@ void exec_pipe(struct cmdline* l) {
 
             // Connect the standard output
             if (l->out && cmd[i + 1] == NULL) {
-                int fd_out = open(l->out, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+                stdout_copy = dup(1);
+                close(0);
+                // fd_out must be 1
+                fd_out = open(l->out, O_WRONLY | O_TRUNC | O_CREAT, 0644);
                 if (fd_out == -1) {
                     perror("[ERROR] open");
                     exit(EXIT_FAILURE);
                 }
-                dup2(fd_out, 1);
-                close(fd_out);
             }
             else if (cmd[i + 1] != NULL) {
                 // If there is one more command after this one,
@@ -217,7 +232,17 @@ void exec_pipe(struct cmdline* l) {
             close(tuyau[0]);
             close(tuyau[1]);
             execvp(cmd[i][0], cmd[i]);
-            printf("\nCommand %s not recognized\n", cmd[i][0]);
+            if (l->in && i == 0) {
+                close(fd_in);
+                dup2(stdin_copy, 0);
+                close(stdin_copy);
+            }
+            if (l->out && cmd[i + 1] == NULL) {
+                close(fd_out);
+                dup2(stdout_copy, 1);
+                close(stdout_copy);
+            }
+            printf("Command %s not recognized\n", cmd[i][0]);
             exit(1);
         } else {
             child_pids[i] = pid;
@@ -234,7 +259,7 @@ void exec_pipe(struct cmdline* l) {
         waitpid(child_pids[i], &status, 0);
     }
     // Kill all child zombies
-    kill(0,SIGCONT);
+    kill(0, SIGCONT);
 }
 
 
@@ -255,11 +280,39 @@ void execute(char** cmd, struct cmdline* l, int nb_args) {
         // TODO: if cmd[0] is not recognized, do not write
         // ex: "a.txt" > cat --> "a.txt" n'est pas une commande, mais tente tout de même d'écrire dans le fichier cat
         // https://stackoverflow.com/questions/9084099/re-opening-stdout-and-stdin-file-descriptors-after-closing-them
-        open_in(l);
-        open_out(l);
+        int fd_in, fd_out, stdin_copy, stdout_copy;
+        if (l->in) {
+            stdin_copy = dup(0);
+            close(0);
+            // fd_in must be 0
+            fd_in = open(l->in, O_RDONLY);
+            if (fd_in == -1) {
+                perror("[ERROR] open");
+                exit(EXIT_FAILURE);
+            }
+        }
+        if (l->out) {
+            stdout_copy = dup(1);
+            close(1);
+            // fd_out must be 1
+            fd_out = open(l->out, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+            if (fd_out == -1) {
+                perror("[ERROR] open");
+                exit(EXIT_FAILURE);
+            }
+        }
         execvp(cmd[0], cmd);
-        dup2(1,1);
-        printf("\nCommand not recognized\n");
+        if (l->in) {
+            close(fd_in);
+            dup2(stdin_copy, 0);
+            close(stdin_copy);
+        }
+        if (l->out) {
+            close(fd_out);
+            dup2(stdout_copy, 1);
+            close(stdout_copy);
+        }
+        printf("\nCommand %s not recognized\n", cmd[0]);
         return;
     }
     else {
@@ -282,7 +335,24 @@ void execute(char** cmd, struct cmdline* l, int nb_args) {
     }
 }
 
+void signal_handler(int sig) {
+    // Reap zombies
+    int pid, status;
+    while((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        struct jobc* j = search_jobc(pid);
+        if (j == NULL) {
+            continue;
+        }
+        printf("\nLe fils [%d: ", pid);
+        for (int i = 0; j->cmd[i] != NULL; i++) {
+            printf("%s ", j->cmd[i]);
+        }
+        printf("\b] est terminé\n");
+    }
+}
+
 int main() {
+    signal(SIGCHLD, signal_handler);
     printf("Variante %d: %s\n", VARIANTE, VARIANTE_STRING);
 
 #if USE_GUILE == 1
