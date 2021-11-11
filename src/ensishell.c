@@ -20,11 +20,11 @@
 #error "Variante non défini !!"
 #endif
 
- /* Guile (1.8 and 2.0) is auto-detected by cmake */
- /* To disable Scheme interpreter (Guile support), comment the
-  * following lines.  You may also have to comment related pkg-config
-  * lines in CMakeLists.txt.
-  */
+/* Guile (1.8 and 2.0) is auto-detected by cmake */
+/* To disable Scheme interpreter (Guile support), comment the
+ * following lines.  You may also have to comment related pkg-config
+ * lines in CMakeLists.txt.
+ */
 
 #if USE_GUILE == 1
 #include <libguile.h>
@@ -149,16 +149,13 @@ void print_jobc() {
 
 void exec_pipe(struct cmdline* l) {
     char*** cmd = l->seq;
-    // Create a new child process
     int tuyau[2], fd_in = 0, to_close = -1;
-    // TODO: gérer la taille du tableau de pid
-    pid_t child_pids[1000];
-    int nb_childs;
     for (int i = 0; cmd[i] != NULL; i++) {
         if (pipe(tuyau) == -1) {
             printf("Pipe creation has failed");
         }
         pid_t pid = fork();
+
         if (pid == 0) {
             // Connect the standard input
             int stdin_copy, stdout_copy, fd_out;
@@ -171,8 +168,7 @@ void exec_pipe(struct cmdline* l) {
                     perror("[ERROR] open");
                     exit(EXIT_FAILURE);
                 }
-            }
-            else {
+            } else {
                 // fd_in is either the standard input or the previous pipe output
                 dup2(fd_in, 0);
                 // Close the previous pipe output duplicated
@@ -191,15 +187,16 @@ void exec_pipe(struct cmdline* l) {
                     perror("[ERROR] open");
                     exit(EXIT_FAILURE);
                 }
-            }
-            else if (cmd[i + 1] != NULL) {
+            } else if (cmd[i + 1] != NULL) {
                 // If there is one more command after this one,
                 // connect the standard output to the input of the pipe
                 dup2(tuyau[1], 1);
             }
+
             close(tuyau[0]);
             close(tuyau[1]);
             execvp(cmd[i][0], cmd[i]);
+
             if (l->in && i == 0) {
                 close(fd_in);
                 dup2(stdin_copy, 0);
@@ -213,21 +210,14 @@ void exec_pipe(struct cmdline* l) {
             printf("Command %s not recognized\n", cmd[i][0]);
             exit(1);
         } else {
-            child_pids[i] = pid;
-            nb_childs = i;
+            // Wait for the end of child process just created before
+            waitpid(0,0,0);
         }
         close(tuyau[1]);
         // Backup the pipe output in order to reuse it for the next command as a standard input
         fd_in = tuyau[0];
         to_close = tuyau[0];
     }
-    // Wait for the end of child process just created before
-    for (int i = 0 ; i < nb_childs ; ++i) {
-        int status;
-        waitpid(child_pids[i], &status, 0);
-    }
-    // Kill all child zombies
-    kill(0, SIGCONT);
 }
 
 void execute(char** cmd, struct cmdline* l, int nb_args) {
