@@ -47,7 +47,6 @@ int question6_executer(char* line) {
     }
 
     if (l->seq[0] != NULL) {
-        // If it is a unique command
         int nb_args = 0;
         char** cmd = l->seq[0];
         for (int j = 0; cmd[j] != 0; j++) {
@@ -225,9 +224,6 @@ void execute(char** cmd, struct cmdline* l, int nb_args) {
 
     pid_t pid;
     if ((pid = fork()) == 0) {
-        // TODO: if cmd[0] is not recognized, do not write
-        // ex: "a.txt" > cat --> "a.txt" n'est pas une commande, mais tente tout de même d'écrire dans le fichier cat
-        // https://stackoverflow.com/questions/9084099/re-opening-stdout-and-stdin-file-descriptors-after-closing-them
         int fd_in, fd_out, stdin_copy, stdout_copy;
         if (l->in) {
             stdin_copy = dup(0);
