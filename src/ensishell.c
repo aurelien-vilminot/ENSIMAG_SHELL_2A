@@ -29,6 +29,8 @@
 #if USE_GUILE == 1
 #include <libguile.h>
 
+void execute(char** cmd, struct cmdline* l, int nb_args);
+
 int question6_executer(char* line) {
     /* Question 6: Insert your code to execute the command line
      * identically to the standard execution scheme:
@@ -38,11 +40,6 @@ int question6_executer(char* line) {
 
      /* parsecmd free line and set it up to 0 */
     struct cmdline* l = parsecmd(&line);
-
-    /* If input stream closed, normal termination */
-    if (!l) {
-        terminate(0);
-    }
 
     if (l->err) {
         /* Syntax error, read another command */
